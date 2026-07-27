@@ -1,9 +1,9 @@
 {
   "index": {
-    "@Arenda_Bali_Villy": 2,
-    "@Nedvizhimost_Bali_Villa": 3,
-    "@Zhile_Bali": 4,
-    "@Nedvizhimost_Bali_Villy": 5
+    "@Arenda_Bali_Villy": 3,
+    "@Nedvizhimost_Bali_Villa": 4,
+    "@Zhile_Bali": 5,
+    "@Nedvizhimost_Bali_Villy": 6
   },
   "published": {
     "@Arenda_Bali_Villy": {
@@ -18,11 +18,24 @@
         553482,
         553483,
         553484
+      ],
+      "7345": [
+        553485
       ]
     },
     "@Nedvizhimost_Bali_Villa": {
       "7345": [
         210592
+      ],
+      "7346": [
+        210593,
+        210594,
+        210595,
+        210596,
+        210597,
+        210598,
+        210599,
+        210600
       ]
     },
     "@Zhile_Bali": {
@@ -35,6 +48,15 @@
         222483,
         222484,
         222485
+      ],
+      "7354": [
+        222486,
+        222487,
+        222488,
+        222489,
+        222490,
+        222491,
+        222492
       ]
     },
     "@Nedvizhimost_Bali_Villy": {
@@ -46,6 +68,18 @@
         367,
         368,
         369
+      ],
+      "7361": [
+        370,
+        371,
+        372,
+        373,
+        374,
+        375,
+        376,
+        377,
+        378,
+        379
       ]
     }
   }
