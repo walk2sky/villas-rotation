@@ -10,6 +10,19 @@
 
   "admin_id": 7285099714,
 
+  "auto_add": {
+    "enabled": true,
+    "hashtag": "#актуально",
+    "skip_hashtags": ["#сдана", "#продана", "#архив"],
+    "thread": null
+  },
+
+  "auto_remove": {
+    "enabled": true,
+    "failures_before_remove": 3,
+    "max_per_run": 2
+  },
+
   "delete_previous": false,
   "cleanup_on_remove": true,
   "pause_between_targets_sec": 300,

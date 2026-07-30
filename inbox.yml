@@ -1,0 +1,34 @@
+name: inbox
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: state
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: check inbox
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: python inbox.py
+
+      - name: save state
+        run: |
+          git config user.name "rotation-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add inbox_state.json villas.json
+          git diff --staged --quiet && exit 0
+          git commit -m "inbox"
+          git pull --rebase --autostash
+          git push
