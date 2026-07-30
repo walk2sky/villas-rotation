@@ -4,14 +4,18 @@
 1. Пересылает админу сообщения, которые люди написали боту в личку.
 2. Следит за группой-базой: новые посты с маркером сам добавляет в villas.json.
 
-Маркер и стоп-хештеги настраиваются в villas.json, блок auto_add.
-Остальные хештеги поста складываются в поле note, чтобы объект
-было легко найти в списке.
+ВАЖНО про альбомы: в Telegram подпись есть только у ПЕРВОГО сообщения
+альбома, у остальных её нет вообще. Поэтому сначала собираются ВСЕ
+фото/видео альбома, и только когда группа "устоялась" (settle),
+проверяется - есть ли хештег хоть у одного сообщения из неё.
+Так десять фото не превращаются в один просто потому, что у девяти
+из них не было подписи.
 
-Альбом определяется автоматически - Telegram помечает все его элементы
-общим идентификатором, скрипт берёт минимальный номер и количество.
-Пост попадает в ротацию не мгновенно, а через один цикл (15-30 минут),
-чтобы альбом успел догрузиться целиком.
+Маркер и стоп-хештеги настраиваются в villas.json, блок auto_add.
+Остальные хештеги поста складываются в поле note.
+
+Этот файл НИКОГДА не удаляет сообщения из группы-базы и вообще
+не вызывает deleteMessage/deleteMessages ни для одного чата.
 
 Пока этот скрипт работает, НЕ открывай getUpdates в браузере:
 оба способа читают одну очередь и будут воровать сообщения друг у друга.
@@ -30,10 +34,9 @@ API = f"https://api.telegram.org/bot{TOKEN}/"
 CONFIG_FILE = "villas.json"
 STATE_FILE = "inbox_state.json"
 
-# сколько секунд после последнего элемента альбома ждать, прежде чем считать его целым
+# сколько секунд после последнего элемента ждать, прежде чем считать группу целой
 SETTLE_SEC = 300
 
-# сколько символов максимум в note
 NOTE_LIMIT = 90
 
 HASHTAG_RE = re.compile(r"#\w+", re.UNICODE)
@@ -74,16 +77,13 @@ def esc(s):
 
 
 def is_source(chat, source):
-    """Это группа-база?"""
     if isinstance(source, str) and source.startswith("@"):
         return (chat.get("username") or "").lower() == source[1:].lower()
     return str(chat.get("id")) == str(source)
 
 
 def tags_of(text):
-    """Все хештеги поста в порядке появления, без повторов."""
-    out = []
-    seen = set()
+    out, seen = [], set()
     for t in HASHTAG_RE.findall(text or ""):
         low = t.lower()
         if low not in seen:
@@ -110,18 +110,42 @@ def handle_private(msg, admin):
     return True
 
 
-# ---------------- новые виллы в базе ----------------
+# ---------------- сбор альбомов из базы ----------------
 
-def wants_rotation(msg, auto):
-    """Проверить маркер, стоп-хештеги и тему."""
+def in_source_scope(msg, cfg, auto):
+    """Это фото/видео в нужной группе (и теме, если задана)? Без проверки хештега."""
+    if not is_source(msg["chat"], cfg["source_chat"]):
+        return False
     if not (msg.get("photo") or msg.get("video")):
         return False
-
     thread = auto.get("thread")
     if thread and msg.get("message_thread_id") != thread:
         return False
+    return True
 
-    caption = msg.get("caption") or ""
+
+def collect(msg, pending):
+    """Накопить ВСЕ элементы поста, независимо от того, есть ли у них подпись."""
+    key = msg.get("media_group_id") or f"single_{msg['message_id']}"
+    item = pending.setdefault(key, {
+        "start": msg["message_id"],
+        "count": 0,
+        "caption": "",
+        "last_date": 0,
+    })
+    item["start"] = min(item["start"], msg["message_id"])
+    item["count"] += 1
+    item["last_date"] = max(item["last_date"], msg.get("date", 0))
+
+    caption = (msg.get("caption") or "").strip()
+    if len(caption) > len(item["caption"]):
+        item["caption"] = caption
+
+    return key
+
+
+def matches_marker(caption, auto):
+    """Проверить хештег-маркер и стоп-хештеги по итоговой подписи группы."""
     tags = {t.lower() for t in tags_of(caption)}
 
     marker = (auto.get("hashtag") or "").strip().lower()
@@ -135,42 +159,15 @@ def wants_rotation(msg, auto):
     return True
 
 
-def collect(msg, pending):
-    """Накопить элементы поста, сгруппировав альбом."""
-    key = msg.get("media_group_id") or f"single_{msg['message_id']}"
-    item = pending.setdefault(key, {
-        "start": msg["message_id"],
-        "count": 0,
-        "caption": "",
-        "last_date": 0,
-    })
-
-    item["start"] = min(item["start"], msg["message_id"])
-    item["count"] += 1
-    item["last_date"] = max(item["last_date"], msg.get("date", 0))
-
-    caption = (msg.get("caption") or "").strip()
-    if len(caption) > len(item["caption"]):
-        item["caption"] = caption
-
-    return key
-
-
 def make_note(caption, auto):
-    """Собрать note из хештегов поста, кроме маркера."""
     marker = (auto.get("hashtag") or "").strip().lower()
     tags = [t for t in tags_of(caption) if t.lower() != marker]
-
-    if tags:
-        note = " ".join(tags)
-    else:
-        note = (caption or "").split("\n")[0].strip()
-
+    note = " ".join(tags) if tags else (caption or "").split("\n")[0].strip()
     return note[:NOTE_LIMIT].strip()
 
 
 def finalize(pending, cfg, auto):
-    """Перенести отстоявшиеся посты в villas.json."""
+    """Проверить отстоявшиеся группы и перенести подходящие в villas.json."""
     now = int(time.time())
     known = {v["start"] for v in cfg["rotation"]}
     added = []
@@ -178,12 +175,15 @@ def finalize(pending, cfg, auto):
     for key in list(pending):
         item = pending[key]
         if now - item["last_date"] < SETTLE_SEC:
-            continue
+            continue  # ещё может докачаться
 
-        pending.pop(key)
+        pending.pop(key)  # группа устоялась, дальше решаем её судьбу окончательно
 
         if item["start"] in known:
             continue
+
+        if not matches_marker(item["caption"], auto):
+            continue  # нет маркера ни у одного сообщения группы - не наш объект
 
         entry = {
             "start": item["start"],
@@ -220,17 +220,14 @@ def main():
         if not msg:
             continue
 
-        chat = msg["chat"]
-
-        if chat["type"] == "private":
+        if msg["chat"]["type"] == "private":
             if handle_private(msg, admin):
                 forwarded += 1
             continue
 
-        if auto.get("enabled") and is_source(chat, cfg["source_chat"]):
-            if wants_rotation(msg, auto):
-                collect(msg, state["pending"])
-                seen += 1
+        if auto.get("enabled") and in_source_scope(msg, cfg, auto):
+            collect(msg, state["pending"])
+            seen += 1
 
     added = []
     if auto.get("enabled"):

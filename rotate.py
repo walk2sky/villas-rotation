@@ -73,7 +73,22 @@ def chunks(lst, n=100):
         yield lst[i:i + n]
 
 
-def delete_ids(chat, ids):
+def same_chat(a, b):
+    a, b = str(a), str(b)
+    if a.startswith("@") and b.startswith("@"):
+        return a.lower() == b.lower()
+    return a == b
+
+
+def delete_ids(chat, ids, source_chat=None):
+    """Удаляет сообщения ТОЛЬКО из целей ротации.
+    Жёсткая защита: если чат совпадает с группой-базой - отказ,
+    что бы ни было в state.json. Это не должно случаться в принципе
+    (source_chat никогда не пишется в state["published"]),
+    но проверка стоит явно, а не полагается на то, что до неё не дойдёт."""
+    if source_chat and same_chat(chat, source_chat):
+        print(f"ЗАЩИТА СРАБОТАЛА: попытка удалить из группы-базы {chat} заблокирована")
+        return
     for part in chunks(ids):
         call("deleteMessages", chat_id=chat, message_ids=part)
 
@@ -96,7 +111,7 @@ def cleanup(cfg, state):
             ids = items.pop(key)
             if ids:
                 print(f"{chat}: снят объект {key}, удаляю {len(ids)} сообщений")
-                delete_ids(chat, ids)
+                delete_ids(chat, ids, cfg.get("source_chat"))
                 removed += len(ids)
     return removed
 
@@ -118,7 +133,7 @@ def publish(cfg, state, n, target):
     if cfg.get("delete_previous"):
         old = state["published"].get(chat, {}).get(key, [])
         if old:
-            delete_ids(chat, old)
+            delete_ids(chat, old, cfg.get("source_chat"))
             state["published"][chat][key] = []
 
     params = {"chat_id": chat, "from_chat_id": cfg["source_chat"], "message_ids": ids}
