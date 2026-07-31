@@ -24,7 +24,7 @@
   },
 
   "delete_previous": false,
-  "cleanup_on_remove": true,
+  "cleanup_on_remove": false,
   "pause_between_targets_sec": 300,
 
   "rotation": [

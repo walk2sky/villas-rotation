@@ -101,7 +101,12 @@ def is_gone(desc):
 # ---------------- уборка копий ----------------
 
 def cleanup(cfg, state):
-    """Удалить копии объектов, которых больше нет в списке ротации."""
+    """Удалить копии объектов, которых больше нет в списке ротации.
+    Если cleanup_on_remove выключен - ничего не делает. Проверка внутри
+    функции, а не на месте вызова, чтобы флаг работал одинаково везде."""
+    if not cfg.get("cleanup_on_remove", True):
+        return 0
+
     active = {str(v["start"]) for v in cfg["rotation"]}
     removed = 0
     for chat, items in state["published"].items():
@@ -215,8 +220,7 @@ def main():
         print("Список ротации пуст")
         return
 
-    if cfg.get("cleanup_on_remove", True):
-        cleanup(cfg, state)
+    cleanup(cfg, state)
 
     targets = cfg["targets"]
     pause = cfg.get("pause_between_targets_sec", 300)
