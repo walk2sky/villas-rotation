@@ -1,6 +1,8 @@
 name: rotate
 
 on:
+  # время в UTC. Бали = UTC+8
+  # 09:00 / 13:00 / 20:30 по Бали
   schedule:
     - cron: "0 1 * * *"
     - cron: "0 5 * * *"
@@ -20,6 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: sync before run
+        run: |
+          git config user.name "rotation-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git pull --ff-only
+
       - name: post
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -27,10 +35,17 @@ jobs:
 
       - name: save state
         run: |
-          git config user.name "rotation-bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add state.json
-          git diff --staged --quiet && exit 0
-          git commit -m "state"
-          git pull --rebase --autostash
-          git push
+          git add state.json villas.json
+          git diff --staged --quiet && { echo "нечего сохранять"; exit 0; }
+          git commit -m "rotate"
+          for i in 1 2 3; do
+            if git push; then
+              echo "запушено"
+              exit 0
+            fi
+            echo "push не прошёл, пробую заново ($i/3)"
+            git pull --rebase
+            sleep 3
+          done
+          echo "ОШИБКА: не удалось запушить после трёх попыток"
+          exit 1
