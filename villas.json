@@ -1,41 +1,88 @@
 {
   "source_chat": "@Balila_Villas",
-
   "targets": [
-    { "chat": "@Arenda_Bali_Villy" },
-    { "chat": "@Nedvizhimost_Bali_Villa" },
-    { "chat": "@Zhile_Bali" },
-    { "chat": "@Nedvizhimost_Bali_Villy" }
+    {
+      "chat": "@Arenda_Bali_Villy"
+    },
+    {
+      "chat": "@Nedvizhimost_Bali_Villa"
+    },
+    {
+      "chat": "@Zhile_Bali"
+    },
+    {
+      "chat": "@Nedvizhimost_Bali_Villy"
+    }
   ],
-
   "admin_id": 7285099714,
-
   "auto_add": {
     "enabled": true,
     "hashtag": "#актуально",
-    "skip_hashtags": ["#сдана", "#продана", "#архив"],
+    "skip_hashtags": [
+      "#сдана",
+      "#продана",
+      "#архив"
+    ],
     "thread": null
   },
-
   "auto_remove": {
     "enabled": true,
     "failures_before_remove": 3,
     "max_per_run": 2
   },
-
   "delete_previous": false,
   "cleanup_on_remove": false,
   "pause_between_targets_sec": 300,
-
   "rotation": [
-    { "start": 7032, "count": 6,  "note": "V308" },
-    { "start": 7333, "count": 10, "note": "V326" },
-    { "start": 7345, "count": 1,  "note": "земля" },
-    { "start": 7346, "count": 8,  "note": "V378" },
-    { "start": 7354, "count": 7,  "note": "V311" },
-    { "start": 7361, "count": 10, "note": "V380" },
-    { "start": 7372, "count": 9,  "note": "апарты" },
-    { "start": 7382, "count": 6,  "note": "ии видео" },
-    { "start": 7388, "count": 10, "note": "V379" }
+    {
+      "start": 7032,
+      "count": 6,
+      "note": "V308"
+    },
+    {
+      "start": 7333,
+      "count": 10,
+      "note": "V326"
+    },
+    {
+      "start": 7345,
+      "count": 1,
+      "note": "земля"
+    },
+    {
+      "start": 7346,
+      "count": 8,
+      "note": "V378"
+    },
+    {
+      "start": 7354,
+      "count": 7,
+      "note": "V311"
+    },
+    {
+      "start": 7361,
+      "count": 10,
+      "note": "V380"
+    },
+    {
+      "start": 7372,
+      "count": 9,
+      "note": "апарты"
+    },
+    {
+      "start": 7382,
+      "count": 6,
+      "note": "ии видео"
+    },
+    {
+      "start": 7388,
+      "count": 10,
+      "note": "V379"
+    },
+    {
+      "start": 7451,
+      "count": 8,
+      "note": "#Canggu #4_спальни #продажа #V307"
+    }
   ]
 }
