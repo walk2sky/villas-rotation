@@ -3,11 +3,11 @@ import google.generativeai as genai
 import subprocess
 import json
 import os
+from config import GEMINI_API_KEY  # Берем ключ из твоего локального конфига
 
 # Твои данные
 TG_TOKEN = "8909396898:AAE0OtE0lamhaMPyOW6_Ys1iN1cwBOYnd-c"
 USER_ID = 7285099714
-GEMINI_API_KEY = "ТВОЙ_КЛЮЧ_GEMINI" # Вставь сюда ключ от Gemini
 
 bot = telebot.TeleBot(TG_TOKEN)
 genai.configure(api_key=GEMINI_API_KEY)
@@ -26,7 +26,6 @@ def parse_command_with_ai(user_text):
     """
     try:
         response = model.generate_content(prompt)
-        # Очищаем ответ от возможной разметки markdown (```json ... ```)
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean_text)
     except Exception as e:
@@ -35,7 +34,6 @@ def parse_command_with_ai(user_text):
 
 @bot.message_handler(content_types=['text'])
 def handle_text(message):
-    # Проверка, что пишет именно хозяин (ты)
     if message.chat.id != USER_ID:
         bot.send_message(message.chat.id, "Доступ запрещен.")
         return
@@ -61,10 +59,10 @@ def handle_text(message):
                 bot.send_message(message.chat.id, f"Вилла {villa} уже в процессе публикации!")
                 continue
             
-            # Запускаем скрипт публикации как отдельный процесс
-            # Здесь предполагаем профиль по умолчанию и список групп (например, bali). 
-            # Можно позже усложнить, чтобы ИИ понимал и локацию.
-            process = subprocess.Popen(["python3", "test.py", "YOUR_PROFILE_ID", f"{villa}:bali"])
+            # ЗАМЕНИ "ТВОЙ_ID_ПРОФИЛЯ_MORELOGIN" НА РЕАЛЬНЫЙ ID ИЗ MORELOGIN
+            profile_id = "ТВОЙ_ID_ПРОФИЛЯ_MORELOGIN" 
+            
+            process = subprocess.Popen(["python3", "test.py", profile_id, f"{villa}:bali"])
             active_processes[villa] = process
             
         bot.send_message(message.chat.id, f"✅ Дал команду на старт вилл: {', '.join(villas)}")
@@ -73,7 +71,7 @@ def handle_text(message):
         for villa in villas:
             if villa in active_processes:
                 process = active_processes[villa]
-                process.terminate() # Жестко убиваем процесс постинга
+                process.terminate()
                 del active_processes[villa]
                 bot.send_message(message.chat.id, f"🛑 Публикация виллы {villa} остановлена.")
             else:
