@@ -1,0 +1,5 @@
+config.py
+progress_*.json
+posting_log.txt
+__pycache__/
+villas/temp_photos/
