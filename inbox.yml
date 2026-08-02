@@ -1,0 +1,47 @@
+name: inbox
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: state
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: sync before run
+        run: |
+          git config user.name "rotation-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git pull --ff-only
+
+      - name: check inbox
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: python inbox.py
+
+      - name: save state
+        run: |
+          git add inbox_state.json villas.json contacts.md
+          git diff --staged --quiet && { echo "нечего сохранять"; exit 0; }
+          git commit -m "inbox"
+          for i in 1 2 3; do
+            if git push; then
+              echo "запушено"
+              exit 0
+            fi
+            echo "push не прошёл, пробую заново ($i/3)"
+            git pull --rebase
+            sleep 3
+          done
+          echo "ОШИБКА: не удалось запушить после трёх попыток"
+          exit 1

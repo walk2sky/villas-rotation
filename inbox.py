@@ -1,24 +1,20 @@
 """
-Делает две вещи за один проход:
+Делает три вещи за один проход:
 
 1. Пересылает админу сообщения, которые люди написали боту в личку.
-2. Следит за группой-базой: новые посты с маркером сам добавляет в villas.json.
+2. Доставляет ответы: админ отвечает РЕПЛАЕМ на пересланное сообщение,
+   бот пересылает этот ответ автору. Задержка до 15 минут - бот
+   просыпается по расписанию, а не живёт постоянно.
+3. Ведёт журнал обращений в contacts.md: дата, имя, ссылка на профиль,
+   начало сообщения.
+
+Плюс следит за группой-базой: новые посты с маркером добавляет в villas.json.
 
 ВАЖНО про альбомы: в Telegram подпись есть только у ПЕРВОГО сообщения
-альбома, у остальных её нет вообще. Поэтому сначала собираются ВСЕ
-фото/видео альбома, и только когда группа "устоялась" (settle),
-проверяется - есть ли хештег хоть у одного сообщения из неё.
-Так десять фото не превращаются в один просто потому, что у девяти
-из них не было подписи.
+альбома. Поэтому сначала собираются ВСЕ фото/видео, и только когда группа
+"устоялась", проверяется хештег по итоговой подписи.
 
-Маркер и стоп-хештеги настраиваются в villas.json, блок auto_add.
-Остальные хештеги поста складываются в поле note.
-
-Этот файл НИКОГДА не удаляет сообщения из группы-базы и вообще
-не вызывает deleteMessage/deleteMessages ни для одного чата.
-
-Пока этот скрипт работает, НЕ открывай getUpdates в браузере:
-оба способа читают одну очередь и будут воровать сообщения друг у друга.
+Токен берётся из переменной окружения, в файле его нет и быть не должно.
 """
 
 import json
@@ -27,17 +23,23 @@ import re
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 
 TOKEN = os.environ["BOT_TOKEN"]
 API = f"https://api.telegram.org/bot{TOKEN}/"
 
 CONFIG_FILE = "villas.json"
 STATE_FILE = "inbox_state.json"
+CONTACTS_FILE = "contacts.md"
 
-# сколько секунд после последнего элемента ждать, прежде чем считать группу целой
 SETTLE_SEC = 300
-
 NOTE_LIMIT = 90
+
+# сколько связок "сообщение у админа -> автор" помнить,
+# то есть на какую глубину переписки можно отвечать реплаем
+REPLY_MEMORY = 500
+
+BALI_TZ = timezone(timedelta(hours=8))
 
 HASHTAG_RE = re.compile(r"#\w+", re.UNICODE)
 
@@ -92,28 +94,100 @@ def tags_of(text):
     return out
 
 
-# ---------------- входящие в личку ----------------
+def full_name(frm):
+    return " ".join(filter(None, [frm.get("first_name"), frm.get("last_name")])) or "без имени"
 
-def handle_private(msg, admin):
+
+# ---------------- журнал обращений ----------------
+
+def log_contact(msg):
+    """Дописать строку в contacts.md."""
     frm = msg.get("from", {})
-    if frm.get("id") == admin:
+    when = datetime.fromtimestamp(msg.get("date", time.time()), BALI_TZ)
+
+    uname = frm.get("username")
+    link = f"https://t.me/{uname}" if uname else ""
+    contact = f"[@{uname}]({link})" if uname else f"id {frm.get('id')}"
+
+    text = (msg.get("text") or msg.get("caption") or "").replace("\n", " ").replace("|", "/")
+    if not text:
+        text = "(медиа без текста)"
+    text = text[:70]
+
+    new_file = not os.path.exists(CONTACTS_FILE)
+    with open(CONTACTS_FILE, "a", encoding="utf-8") as f:
+        if new_file:
+            f.write("# Обращения в бота\n\n")
+            f.write("Время по Бали (UTC+8).\n\n")
+            f.write("| Дата | Имя | Контакт | Сообщение |\n")
+            f.write("|---|---|---|---|\n")
+        f.write(f"| {when:%d.%m.%Y %H:%M} | {full_name(frm)} | {contact} | {text} |\n")
+
+
+# ---------------- личка ----------------
+
+def deliver_reply(msg, state, admin):
+    """Админ ответил реплаем - доставить ответ автору."""
+    reply_to = msg.get("reply_to_message")
+    if not reply_to:
         return False
 
-    name = esc(" ".join(filter(None, [frm.get("first_name"), frm.get("last_name")])))
+    user_id = state["reply_map"].get(str(reply_to["message_id"]))
+    if not user_id:
+        call("sendMessage", chat_id=admin,
+             text="⚠️ Не знаю, кому это адресовано. Отвечай реплаем на пересланное "
+                  "сообщение клиента, а не на своё или на старое.")
+        return False
+
+    res = call("copyMessage", chat_id=user_id,
+               from_chat_id=msg["chat"]["id"], message_id=msg["message_id"])
+
+    if res.get("ok"):
+        call("sendMessage", chat_id=admin, text="✅ Ответ доставлен")
+        print(f"Ответ доставлен пользователю {user_id}")
+        return True
+
+    desc = res.get("description", "")
+    call("sendMessage", chat_id=admin, text=f"❌ Не доставлено: {desc}")
+    print(f"Ответ не доставлен: {desc}")
+    return False
+
+
+def handle_incoming(msg, state, admin):
+    """Сообщение от клиента: переслать админу, запомнить связку, записать в журнал."""
+    frm = msg.get("from", {})
+
     uname = frm.get("username")
     contact = f"@{uname}" if uname else f'<a href="tg://user?id={frm["id"]}">написать</a>'
+    header = (f"📩 <b>Написали боту</b>\n{esc(full_name(frm))} · {contact}\n"
+              f"<i>Ответь реплаем на следующее сообщение</i>")
 
-    call("sendMessage", chat_id=admin, text=f"📩 <b>Написали боту</b>\n{name} · {contact}",
-         parse_mode="HTML", disable_web_page_preview=True)
-    call("forwardMessage", chat_id=admin,
-         from_chat_id=msg["chat"]["id"], message_id=msg["message_id"])
+    h = call("sendMessage", chat_id=admin, text=header,
+             parse_mode="HTML", disable_web_page_preview=True)
+    f = call("forwardMessage", chat_id=admin,
+             from_chat_id=msg["chat"]["id"], message_id=msg["message_id"])
+
+    # реплай сработает и на шапку, и на само пересланное сообщение
+    for res in (h, f):
+        if res.get("ok"):
+            state["reply_map"][str(res["result"]["message_id"])] = frm["id"]
+
+    log_contact(msg)
     return True
+
+
+def trim_reply_map(state):
+    """Держать связки в разумном размере."""
+    rm = state["reply_map"]
+    if len(rm) <= REPLY_MEMORY:
+        return
+    for key in sorted(rm, key=int)[:len(rm) - REPLY_MEMORY]:
+        rm.pop(key, None)
 
 
 # ---------------- сбор альбомов из базы ----------------
 
 def in_source_scope(msg, cfg, auto):
-    """Это фото/видео в нужной группе (и теме, если задана)? Без проверки хештега."""
     if not is_source(msg["chat"], cfg["source_chat"]):
         return False
     if not (msg.get("photo") or msg.get("video")):
@@ -125,13 +199,9 @@ def in_source_scope(msg, cfg, auto):
 
 
 def collect(msg, pending):
-    """Накопить ВСЕ элементы поста, независимо от того, есть ли у них подпись."""
     key = msg.get("media_group_id") or f"single_{msg['message_id']}"
     item = pending.setdefault(key, {
-        "start": msg["message_id"],
-        "count": 0,
-        "caption": "",
-        "last_date": 0,
+        "start": msg["message_id"], "count": 0, "caption": "", "last_date": 0,
     })
     item["start"] = min(item["start"], msg["message_id"])
     item["count"] += 1
@@ -140,22 +210,17 @@ def collect(msg, pending):
     caption = (msg.get("caption") or "").strip()
     if len(caption) > len(item["caption"]):
         item["caption"] = caption
-
     return key
 
 
 def matches_marker(caption, auto):
-    """Проверить хештег-маркер и стоп-хештеги по итоговой подписи группы."""
     tags = {t.lower() for t in tags_of(caption)}
-
     marker = (auto.get("hashtag") or "").strip().lower()
     if marker and marker not in tags:
         return False
-
     for skip in auto.get("skip_hashtags", []):
         if skip.strip().lower() in tags:
             return False
-
     return True
 
 
@@ -167,7 +232,6 @@ def make_note(caption, auto):
 
 
 def finalize(pending, cfg, auto):
-    """Проверить отстоявшиеся группы и перенести подходящие в villas.json."""
     now = int(time.time())
     known = {v["start"] for v in cfg["rotation"]}
     added = []
@@ -175,15 +239,13 @@ def finalize(pending, cfg, auto):
     for key in list(pending):
         item = pending[key]
         if now - item["last_date"] < SETTLE_SEC:
-            continue  # ещё может докачаться
-
-        pending.pop(key)  # группа устоялась, дальше решаем её судьбу окончательно
+            continue
+        pending.pop(key)
 
         if item["start"] in known:
             continue
-
         if not matches_marker(item["caption"], auto):
-            continue  # нет маркера ни у одного сообщения группы - не наш объект
+            continue
 
         entry = {
             "start": item["start"],
@@ -202,8 +264,11 @@ def main():
     cfg = load(CONFIG_FILE)
     admin = cfg["admin_id"]
     auto = cfg.get("auto_add", {})
-    state = load(STATE_FILE, {"offset": 0, "pending": {}})
+
+    state = load(STATE_FILE, {})
+    state.setdefault("offset", 0)
     state.setdefault("pending", {})
+    state.setdefault("reply_map", {})
 
     res = call("getUpdates", offset=state["offset"], timeout=0,
                allowed_updates=["message"])
@@ -212,6 +277,7 @@ def main():
         return
 
     forwarded = 0
+    replied = 0
     seen = 0
 
     for u in res.get("result", []):
@@ -221,13 +287,19 @@ def main():
             continue
 
         if msg["chat"]["type"] == "private":
-            if handle_private(msg, admin):
-                forwarded += 1
+            if msg.get("from", {}).get("id") == admin:
+                if deliver_reply(msg, state, admin):
+                    replied += 1
+            else:
+                if handle_incoming(msg, state, admin):
+                    forwarded += 1
             continue
 
         if auto.get("enabled") and in_source_scope(msg, cfg, auto):
             collect(msg, state["pending"])
             seen += 1
+
+    trim_reply_map(state)
 
     added = []
     if auto.get("enabled"):
@@ -238,6 +310,7 @@ def main():
     save(STATE_FILE, state)
 
     print(f"Переслано в личку: {forwarded}")
+    print(f"Доставлено ответов: {replied}")
     print(f"Замечено элементов в базе: {seen}")
     for entry in added:
         print(f"Добавлено в ротацию: {entry['start']} ({entry['count']} шт.) {entry['note']}")
